@@ -38,3 +38,15 @@ bash-builder /path/to/project /path/to/project/setup.sh
 ```sh
 bash-builder /path/to/my-other-project /path/to/project/setup.sh
 ```
+
+## Install
+
+Open a terminal, copy the command below, and run it.
+
+```sh
+mkdir -p ~/.local/bin | curl https://raw.githubusercontent.com/mbatc/bash-builder/main/bash-builder>~/.local/bin/bash-builder | chmod u+x ~/.local/bin/bash-builder
+```
+
+Run `bash-builder` in your terminal to check it was successful.
+
+> The command downloads the bash-builder script to your ~/.local/bin folder and makes it executable.
