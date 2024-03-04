@@ -1,0 +1,233 @@
+#!/bin/bash -i
+
+if test -z "$1" || test -z "$2"; then
+  echo "Usage: bash-builder project/path build/script.sh"
+  exit
+fi
+
+eval "$(micromamba shell hook --shell bash)"
+
+get_cannon_path() {
+  if test -f $1 || test -d $1; then
+    echo $(cd "$1"; pwd)
+  else
+    mkdir -p "$1"
+    echo $(cd "$1"; pwd)
+    rm -r "$1"
+  fi
+}
+
+push_cd() {
+  # Same as pushd but with no output
+  pushd "$TargetPath" > /dev/null
+}
+
+pop_cd() {
+  # Same as popd but with no output
+  popd > /dev/null
+}
+
+# Common Paths
+SCRIPT_DIR=$(dirname "$0")
+CANON_SCRIPT_DIR=$(get_cannon_path "$SCRIPT_DIR")
+CONFIG_DIR=".build/conf"
+CONFIG_DIR="$(get_cannon_path "$CONFIG_DIR")"
+ROOT_DIR="$(get_cannon_path "$1")"
+
+echo "-- Set working directory to '$ROOT_DIR'"
+
+push_cd "$ROOT_DIR"
+
+eval_template() {
+  # Read a file and evaluate environment variables in place.
+  eval "echo \"$(cat $1)\""
+}
+
+write_template() {
+  echo "-- Write template '$1' to '$2'"
+  echo "$(eval_template "$1")"> $2
+}
+
+get_var_path() {
+  echo "$CONFIG_DIR/$1"
+}
+
+set_conf_var() {
+  # Set a config variable that can be retrieved with get_config_var.
+  # Values are saved to the conf/ directory in a file with name of the variable.
+  # Delete the file associated with a variable to reset it.
+  local Name=$1
+  local Value=$2
+  local CacheFile=$(get_var_path "$Name")
+  mkdir -p $(dirname "$CacheFile")
+  echo -n "$Value">"$CacheFile"
+  echo "-- Set '$Name' to "$Value""
+}
+
+get_conf_var() {
+  # Get a config variable previously set with set_config_var.
+  # To read a value to a variable you should use the syntax 'MyVariable=$(get_config_var variableName)''
+  local Name=$1
+  local CacheFile=$(get_var_path "$Name")
+  if test -f "$CacheFile"; then
+    echo -n $(cat "$CacheFile")
+  fi
+}
+
+delete_conf_var() {
+  local CacheFile=$(get_var_path "$Name")
+}
+
+configure_path() {
+  # Prompt the user to configure a path if it is not set.
+  # Saves the path provided as a config variable which can be retrieved with get_config_var.
+  local PathName="$1"
+  local DefaultPath="$2"
+  local CurrentPath=$(get_conf_var "$PathName")
+
+  echo "-- Configure '$PathName' path"
+
+  if test -z "$CurrentPath"; then
+    read -p "   Set path for '$PathName' (default is '$DefaultPath')?: " CurrentPath
+
+    if test -z "$CurrentPath"; then
+      CurrentPath="$DefaultPath"
+    fi
+
+    # Resolve the full path before saving it
+    CurrentPath=$(get_cannon_path "$CurrentPath")
+
+    set_conf_var "$PathName" "$CurrentPath"
+  else
+    echo "   $PathName path is configured to '$CurrentPath'. Delete $(get_var_path "$PathName") to reconfigure this."
+  fi
+}
+
+configure_var() {
+  # Prompt the user to configure a variable if it is not set.
+  # Saves the value provided as a config variable which can be retrieved with get_config_var.
+  local VarName=$1
+  local DefaultValue=$2
+  local CurrentValue=$(get_conf_var "$VarName")
+
+  echo "-- Configure variable '$VarName'"
+
+  if test -z "$CurrentValue"; then
+    read -p "   Set value for '$VarName' (default is '$DefaultValue')?: " CurrentPath
+
+    if test -z "$CurrentValue"; then
+      CurrentValue="$DefaultValue"
+    fi
+
+    set_conf_var "$VarName" "$CurrentValue"
+  else
+    echo "   '$VarName' set to '$CurrentValue'. Delete $(get_var_path "$VarName") to reconfigure this."
+  fi
+}
+
+prompt_yes_no() {
+  local Prompt="$1"
+  while : ; do
+    read -p "$Prompt"
+    [[ $REPLY == "y" || $REPLY == "Y" || $REPLY == "n" || $REPLY == "N" ]] && break
+  done
+  if [[ $REPLY == "Y" || $REPLY == "y" ]]; then
+    return 0;
+  else
+    return 1;
+  fi
+}
+
+setup_repo() {
+  local Name="$1"
+  local GitURL="$2"
+  local GitBranch="$3"
+
+  configure_path "$Name" "$ROOT_DIR/../$(basename "$GitURL" .git)"
+
+  local TargetPath=$(get_conf_var $Name)
+  local Clone=true
+
+  echo "-- Setup $Name repo in $TargetPath"
+  if test -d "$TargetPath"; then
+    push_cd "$TargetPath"
+    local IsRepo=$(git rev-parse --is-inside-work-tree)
+    pop_cd
+
+    if [[ "$IsRepo" == "true" ]]; then
+      echo "   Repo already exists at $TargetPath."
+      Clone=false
+    elif [ -z "$(ls -A "$TargetPath")" ]; then
+      echo "   $TargetPath already exists but is empty."
+    else
+      echo "   $TargetPath already exists and is not a git repo. Cannot continue."
+      return 1
+    fi
+  elif test -f $TargetPath; then
+    echo "   $TargetPath is a file. Cannot clone $Name repo here"
+    return 1
+  fi
+
+  if $Clone; then
+    echo "   Creating target directory '$TargetPath'"
+    mkdir -p "$TargetPath"
+
+    echo "   Cloning '$GitURL@$GitBranch' to '$TargetPath'"
+
+    push_cd "$TargetPath"
+    git clone -b "$GitBranch" "$GitURL" .
+    pop_cd
+  fi
+
+  push_cd "$TargetPath"
+  local CurrentBranch=$(git rev-parse --abbrev-ref HEAD)
+
+  if ! [[ "$CurrentBranch" == "$GitBranch" ]]; then
+    if prompt_yes_no "   Switch branch from '$CurrentBranch' to '$GitBranch' (working tree changes will be stashed) [Y/n]? "; then
+      echo "   Checking out '$GitBranch'"
+      git stash
+      git checkout "$GitBranch"
+    fi
+  else
+    echo "   Already checked out the target branch ($GitBranch)"
+  fi
+
+  pop_cd
+
+  return 0
+}
+
+mamba_env_exists() {
+  local EnvName="$1"
+  if test -d "$MAMBA_ROOT_PREFIX/envs/$EnvName"; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+echo "-- Build env variables"
+echo "   SCRIPT_DIR:       $SCRIPT_DIR"
+echo "   CANON_SCRIPT_DIR: $CANON_SCRIPT_DIR"
+echo "   CONFIG_DIR:       $CONFIG_DIR"
+echo "   ROOT_DIR:         $ROOT_DIR"
+echo ""
+echo "-- Build Variables (see get_conf_var/set_conf_var):"
+
+for path in "$CONFIG_DIR/*"
+do
+  if ! test -z "$path"; then
+    file="$(basename "$path")"
+    echo "     $file='$(get_conf_var "$file")'"
+  fi
+done
+
+if test -z "$1"; then
+  echo ""
+  echo "  Pass the script to run in the builder context as an argument."
+else
+  echo "-- Running $2"
+  source "$2"
+fi
+
+pop_cd
