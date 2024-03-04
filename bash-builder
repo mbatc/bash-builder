@@ -1,7 +1,11 @@
 #!/bin/bash -i
 
 if test -z "$1" || test -z "$2"; then
-  echo "Usage: bash-builder project/path build/script.sh"
+  echo ""
+  echo "Please specify the project path and the script to run within the project context."
+  echo ""
+  echo "  Usage: bash-builder project/path build/script.sh"
+  echo ""
   exit
 fi
 
@@ -232,13 +236,8 @@ do
   fi
 done
 
-if test -z "$1"; then
-  echo ""
-  echo "  Pass the script to run in the builder context as an argument."
-else
-  echo ""
-  echo "-- Running $CANON_TARGET_SCRIPT"
-  source "$CANON_TARGET_SCRIPT"
-fi
+echo ""
+echo "-- Running $CANON_TARGET_SCRIPT"
+source "$CANON_TARGET_SCRIPT"
 
 pop_cd
