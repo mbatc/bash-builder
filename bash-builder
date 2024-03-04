@@ -5,11 +5,11 @@ if test -z "$1" || test -z "$2"; then
   exit
 fi
 
-eval "$(micromamba shell hook --shell bash)"
-
 get_cannon_path() {
-  if test -f $1 || test -d $1; then
+  if test -d $1; then
     echo $(cd "$1"; pwd)
+  elif test -f $1; then
+    echo "$(get_cannon_path $(dirname "$1"))/$(basename "$1")"
   else
     mkdir -p "$1"
     echo $(cd "$1"; pwd)
@@ -28,15 +28,16 @@ pop_cd() {
 }
 
 # Common Paths
-SCRIPT_DIR=$(dirname "$0")
-CANON_SCRIPT_DIR=$(get_cannon_path "$SCRIPT_DIR")
-CONFIG_DIR=".build/conf"
-CONFIG_DIR="$(get_cannon_path "$CONFIG_DIR")"
-ROOT_DIR="$(get_cannon_path "$1")"
+SCRIPT_DIR="$(dirname "$0")"
+CANON_SCRIPT_DIR="$(get_cannon_path "$SCRIPT_DIR")"
+TARGET_SCRIPT="$2"
+CANON_TARGET_SCRIPT="$(get_cannon_path "$2")"
+PROJECT_DIR="$(get_cannon_path "$1")"
+CONFIG_DIR="$PROJECT_DIR/.bash-builder/conf"
 
-echo "-- Set working directory to '$ROOT_DIR'"
+echo "-- Set working directory to '$PROJECT_DIR'"
 
-push_cd "$ROOT_DIR"
+push_cd "$PROJECT_DIR"
 
 eval_template() {
   # Read a file and evaluate environment variables in place.
@@ -143,7 +144,7 @@ setup_repo() {
   local GitURL="$2"
   local GitBranch="$3"
 
-  configure_path "$Name" "$ROOT_DIR/../$(basename "$GitURL" .git)"
+  configure_path "$Name" "$PROJECT_DIR/../$(basename "$GitURL" .git)"
 
   local TargetPath=$(get_conf_var $Name)
   local Clone=true
@@ -197,28 +198,37 @@ setup_repo() {
   return 0
 }
 
-mamba_env_exists() {
-  local EnvName="$1"
-  if test -d "$MAMBA_ROOT_PREFIX/envs/$EnvName"; then
-    return 0
-  else
-    return 1
-  fi
-}
+_BASH_BUILDER_MICROMAMBA=$(command -v micromamba)
+
+if ! test -z $_BASH_BUILDER_MICROMAMBA; then
+  echo "-- Enabling micromamba support"
+  eval "$($_BASH_BUILDER_MICROMAMBA shell hook --shell bash)"
+  
+  mamba_env_exists() {
+    local EnvName="$1"
+    if test -d "$MAMBA_ROOT_PREFIX/envs/$EnvName"; then
+      return 0
+    else
+      return 1
+    fi
+  }
+fi
 
 echo "-- Build env variables"
-echo "   SCRIPT_DIR:       $SCRIPT_DIR"
-echo "   CANON_SCRIPT_DIR: $CANON_SCRIPT_DIR"
-echo "   CONFIG_DIR:       $CONFIG_DIR"
-echo "   ROOT_DIR:         $ROOT_DIR"
+echo "   SCRIPT_DIR:          $SCRIPT_DIR"
+echo "   CANON_SCRIPT_DIR:    $CANON_SCRIPT_DIR"
+echo "   PROJECT_DIR:         $PROJECT_DIR"
+echo "   CONFIG_DIR:          $CONFIG_DIR"
+echo "   TARGET_SCRIPT:       $TARGET_SCRIPT"
+echo "   CANON_TARGET_SCRIPT: $CANON_TARGET_SCRIPT"
 echo ""
 echo "-- Build Variables (see get_conf_var/set_conf_var):"
 
-for path in "$CONFIG_DIR/*"
+for path in $CONFIG_DIR/*
 do
   if ! test -z "$path"; then
     file="$(basename "$path")"
-    echo "     $file='$(get_conf_var "$file")'"
+    echo "     $file=$(get_conf_var "$file")"
   fi
 done
 
@@ -226,8 +236,9 @@ if test -z "$1"; then
   echo ""
   echo "  Pass the script to run in the builder context as an argument."
 else
-  echo "-- Running $2"
-  source "$2"
+  echo ""
+  echo "-- Running $CANON_TARGET_SCRIPT"
+  source "$CANON_TARGET_SCRIPT"
 fi
 
 pop_cd
