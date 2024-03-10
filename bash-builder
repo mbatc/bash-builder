@@ -118,7 +118,7 @@ configure_var() {
   echo "-- Configure variable '$VarName'"
 
   if test -z "$CurrentValue"; then
-    read -p "   Set value for '$VarName' (default is '$DefaultValue')?: " CurrentPath
+    read -p "   Set value for '$VarName' (default is '$DefaultValue')?: " CurrentValue
 
     if test -z "$CurrentValue"; then
       CurrentValue="$DefaultValue"
